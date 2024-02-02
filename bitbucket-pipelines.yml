@@ -1,0 +1,197 @@
+image: atlassian/default-image:4
+
+pipelines:
+  branches:
+    release/development:
+      - step:
+          name: Fetch .env file from S3
+          image: amazon/aws-cli
+          script:
+            - aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}
+            - aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
+            - aws configure set default.region ${AWS_REGION}
+            - aws s3 cp s3://${ENVS}/${BITBUCKET_REPO_SLUG}/dev.env .env
+          artifacts:
+            - .env # This will make the .env file available to subsequent steps
+      - step:
+          name: Building & pushing Docker image
+          services:
+            - docker-build
+          caches:
+            - docker
+          script:
+            - docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}
+            - docker build . -t ${DOCKERHUB_USERNAME}/${BITBUCKET_REPO_SLUG}:dev
+            - docker push ${DOCKERHUB_USERNAME}/${BITBUCKET_REPO_SLUG}:dev
+      - step:
+          name: "Deployment (dev)"
+          deployment: dev
+          script:           
+            - pipe: atlassian/scp-deploy:1.4.1
+              variables:
+                USER: ${DEFAULT_SSH_USER}
+                SERVER: ${HOST}
+                SSH_KEY: ${DEFAULT_SSH_KEY}
+                REMOTE_PATH: '/home/${DEFAULT_SSH_USER}'
+                LOCAL_PATH: 'docker-compose.yml'
+                EXTRA_ARGS: ["-P", "${DEFAULT_SSH_PORT}", "-o", "StrictHostKeyChecking=no"]
+                DEBUG: 'true'
+            - pipe: atlassian/ssh-run:0.5.0
+              variables:
+                SSH_USER: ${DEFAULT_SSH_USER}
+                SERVER: ${HOST}
+                PORT: ${DEFAULT_SSH_PORT}
+                SSH_KEY: ${DEFAULT_SSH_KEY}
+                MODE: 'script'
+                COMMAND: 'deploy.sh'
+                ENV_VARS: >-
+                  ENV=dev
+                  DOCKERHUB_USERNAME=${DOCKERHUB_USERNAME}
+                  DOCKERHUB_PASSWORD=${DOCKERHUB_PASSWORD}
+                  BITBUCKET_REPO_SLUG=${BITBUCKET_REPO_SLUG}
+                  DEFAULT_SSH_USER=${DEFAULT_SSH_USER}
+      - step:
+          name: "E-mail notification"
+          script:
+          - ALERT_TYPE="SUCCESS"
+          - if [[ $BITBUCKET_EXIT_CODE -ne 0 ]]; then ALERT_TYPE="FAIL"; fi
+          - pipe: atlassian/email-notify:0.11.0
+            variables:
+              USERNAME: ${SMTP_USERNAME}
+              PASSWORD: ${SMTP_PASSWORD}
+              HOST: ${SMTP_HOST}
+              PORT: ${SMTP_PORT}
+              FROM: "devops@scio.systems"
+              TO: "dev@scio.systems"
+              SUBJECT: '${ALERT_TYPE}: Bitbucket Pipe Notification for ${BITBUCKET_REPO_SLUG} - ${BITBUCKET_BRANCH}'
+
+    release/staging:
+      - step:
+          name: Fetch .env file from S3
+          image: amazon/aws-cli
+          script:
+            - aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}
+            - aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
+            - aws configure set default.region ${AWS_REGION}
+            - aws s3 cp s3://${ENVS}/${BITBUCKET_REPO_SLUG}/stg.env .env
+          artifacts:
+            - .env # This will make the .env file available to subsequent steps
+      - step:
+          name: Building & pushing Docker image
+          services:
+            - docker-build
+          caches:
+            - docker
+          script:
+            - docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}
+            - docker build . -t ${DOCKERHUB_USERNAME}/${BITBUCKET_REPO_SLUG}:stg
+            - docker push ${DOCKERHUB_USERNAME}/${BITBUCKET_REPO_SLUG}:stg
+      - step:
+          name: "Deployment (stg)"
+          deployment: stg
+          script:           
+            - pipe: atlassian/scp-deploy:1.4.1
+              variables:
+                USER: ${DEFAULT_SSH_USER}
+                SERVER: ${HOST}
+                SSH_KEY: ${DEFAULT_SSH_KEY}
+                REMOTE_PATH: '/home/${DEFAULT_SSH_USER}'
+                LOCAL_PATH: 'docker-compose.yml'
+                EXTRA_ARGS: ["-P", "${DEFAULT_SSH_PORT}", "-o", "StrictHostKeyChecking=no"]
+                DEBUG: 'true'
+            - pipe: atlassian/ssh-run:0.5.0
+              variables:
+                SSH_USER: ${DEFAULT_SSH_USER}
+                SERVER: ${HOST}
+                PORT: ${DEFAULT_SSH_PORT}
+                SSH_KEY: ${DEFAULT_SSH_KEY}
+                MODE: 'script'
+                COMMAND: 'deploy.sh'
+                ENV_VARS: >-
+                  ENV=stg
+                  DOCKERHUB_USERNAME=${DOCKERHUB_USERNAME}
+                  DOCKERHUB_PASSWORD=${DOCKERHUB_PASSWORD}
+                  BITBUCKET_REPO_SLUG=${BITBUCKET_REPO_SLUG}
+                  DEFAULT_SSH_USER=${DEFAULT_SSH_USER}
+      - step:
+          name: "E-mail notification"
+          script:
+          - ALERT_TYPE="SUCCESS"
+          - if [[ $BITBUCKET_EXIT_CODE -ne 0 ]]; then ALERT_TYPE="FAIL"; fi
+          - pipe: atlassian/email-notify:0.11.0
+            variables:
+              USERNAME: ${SMTP_USERNAME}
+              PASSWORD: ${SMTP_PASSWORD}
+              HOST: ${SMTP_HOST}
+              PORT: ${SMTP_PORT}
+              FROM: "devops@scio.systems"
+              TO: "dev@scio.systems"
+              SUBJECT: '${ALERT_TYPE}: Bitbucket Pipe Notification for ${BITBUCKET_REPO_SLUG} - ${BITBUCKET_BRANCH}'
+    release/production:
+          - step:
+              name: Fetch .env file from S3
+              image: amazon/aws-cli
+              script:
+                - aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}
+                - aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
+                - aws configure set default.region ${AWS_REGION}
+                - aws s3 cp s3://${ENVS}/${BITBUCKET_REPO_SLUG}/prod.env .env
+              artifacts:
+                - .env # This will make the .env file available to subsequent steps
+          - step:
+              name: Building & pushing Docker image
+              services:
+                - docker-build
+              caches:
+                - docker
+              script:
+                - docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}
+                - docker build . -t ${DOCKERHUB_USERNAME}/${BITBUCKET_REPO_SLUG}:prod
+                - docker push ${DOCKERHUB_USERNAME}/${BITBUCKET_REPO_SLUG}:prod
+          - step:
+              name: "Deployment (prod)"
+              deployment: prod
+              script:           
+                - pipe: atlassian/scp-deploy:1.4.1
+                  variables:
+                    USER: ${DEFAULT_SSH_USER}
+                    SERVER: ${HOST}
+                    SSH_KEY: ${DEFAULT_SSH_KEY}
+                    REMOTE_PATH: '/home/${DEFAULT_SSH_USER}'
+                    LOCAL_PATH: 'docker-compose.yml'
+                    EXTRA_ARGS: ["-P", "${DEFAULT_SSH_PORT}", "-o", "StrictHostKeyChecking=no"]
+                    DEBUG: 'true'
+                - pipe: atlassian/ssh-run:0.5.0
+                  variables:
+                    SSH_USER: ${DEFAULT_SSH_USER}
+                    SERVER: ${HOST}
+                    PORT: ${DEFAULT_SSH_PORT}
+                    SSH_KEY: ${DEFAULT_SSH_KEY}
+                    MODE: 'script'
+                    COMMAND: 'deploy.sh'
+                    ENV_VARS: >-
+                      ENV=prod
+                      DOCKERHUB_USERNAME=${DOCKERHUB_USERNAME}
+                      DOCKERHUB_PASSWORD=${DOCKERHUB_PASSWORD}
+                      BITBUCKET_REPO_SLUG=${BITBUCKET_REPO_SLUG}
+                      DEFAULT_SSH_USER=${DEFAULT_SSH_USER}
+          - step:
+              name: "E-mail notification"
+              script:
+              - ALERT_TYPE="SUCCESS"
+              - if [[ $BITBUCKET_EXIT_CODE -ne 0 ]]; then ALERT_TYPE="FAIL"; fi
+              - pipe: atlassian/email-notify:0.11.0
+                variables:
+                  USERNAME: ${SMTP_USERNAME}
+                  PASSWORD: ${SMTP_PASSWORD}
+                  HOST: ${SMTP_HOST}
+                  PORT: ${SMTP_PORT}
+                  FROM: "devops@scio.systems"
+                  TO: "dev@scio.systems"
+                  SUBJECT: '${ALERT_TYPE}: Bitbucket Pipe Notification for ${BITBUCKET_REPO_SLUG} - ${BITBUCKET_BRANCH}'
+
+definitions:
+  services:
+    docker-build:
+      memory: 3072
+      type: docker

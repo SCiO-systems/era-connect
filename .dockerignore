@@ -1,0 +1,5 @@
+docker-compose*
+Jenkinsfile
+.gitignore
+Dockerfile
+README.md

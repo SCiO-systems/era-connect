@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  app:
+    image: sciohub/era-connect:${ENV}
+    container_name: era-connect
+    restart: unless-stopped
+    ports:
+      - 8000:80
